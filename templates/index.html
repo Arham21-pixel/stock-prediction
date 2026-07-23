@@ -98,17 +98,12 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 32px;
+  padding: 20px 32px;
   width: 100%;
   z-index: 50;
 }
 @media (min-width: 768px) {
-  .navbar { padding: 24px 112px; }
-}
-
-.nav-left { display: flex; align-items: center; gap: 48px; }
-@media (min-width: 768px) {
-  .nav-left { gap: 80px; }
+  .navbar { padding: 28px 112px; }
 }
 
 .logo-brand {
@@ -119,7 +114,7 @@ body {
   color: hsl(var(--foreground));
 }
 .logo-icon-svg {
-  width: 32px; height: 32px;
+  width: 34px; height: 34px;
   background: linear-gradient(135deg, #fff 0%, #a3a3a3 100%);
   border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
@@ -128,43 +123,30 @@ body {
   font-size: 18px;
 }
 .logo-text {
-  font-size: 1.25rem;
+  font-size: 1.3rem;
   font-weight: 700;
   letter-spacing: -0.025em;
 }
 
-.nav-links {
-  display: none;
-  align-items: center;
-  gap: 4px;
-}
-@media (min-width: 768px) {
-  .nav-links { display: flex; }
-}
-.nav-link {
+.nav-live-badge {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
   color: hsl(var(--muted-foreground));
-  text-decoration: none;
-  font-size: 0.875rem;
-  font-weight: 500;
-  padding: 6px 12px;
-  border-radius: 6px;
-  transition: color 0.15s ease;
-  display: flex; align-items: center; gap: 4px;
-}
-.nav-link:hover { color: hsl(var(--foreground)); }
-
-.btn-signin {
-  background-color: hsl(var(--foreground));
-  color: hsl(var(--background));
-  border: none;
-  border-radius: 8px;
-  padding: 8px 18px;
-  font-size: 0.875rem;
+  border-radius: 100px;
+  padding: 6px 14px;
+  font-size: 0.75rem;
   font-weight: 600;
-  cursor: pointer;
-  transition: opacity 0.15s ease;
+  letter-spacing: 0.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
-.btn-signin:hover { opacity: 0.9; }
+.live-dot {
+  width: 6px; height: 6px;
+  background-color: var(--up);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--up);
+}
 
 /* Hero Main Content */
 .hero-content {
@@ -259,12 +241,13 @@ body {
   color: hsl(var(--background));
   border: none;
   border-radius: 100px;
-  padding: 16px 32px;
+  padding: 16px 36px;
   font-size: 0.95rem;
-  font-weight: 600;
+  font-weight: 700;
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease;
   white-space: nowrap;
+  letter-spacing: 0.3px;
 }
 .btn-cta:hover { transform: scale(1.03); }
 .btn-cta:active { transform: scale(0.98); }
@@ -597,22 +580,15 @@ footer {
 
   <!-- Navbar -->
   <nav class="navbar">
-    <div class="nav-left">
-      <a href="#" class="logo-brand">
-        <div class="logo-icon-svg">N</div>
-        <span class="logo-text">Neuralyn</span>
-      </a>
-      <div class="nav-links">
-        <a href="#" class="nav-link">Home</a>
-        <a href="#" class="nav-link">
-          Services
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
-        </a>
-        <a href="#" class="nav-link">Reviews</a>
-        <a href="#" class="nav-link">Contact us</a>
-      </div>
+    <a href="#" class="logo-brand">
+      <div class="logo-icon-svg">N</div>
+      <span class="logo-text">Neuralyn</span>
+    </a>
+
+    <div class="nav-live-badge">
+      <span class="live-dot"></span>
+      LIVE NSE ANALYTICS
     </div>
-    <button class="btn-signin" onclick="document.getElementById('tickerInput').focus()">Sign In</button>
   </nav>
 
   <!-- Hero Main Content -->
@@ -650,7 +626,7 @@ footer {
         <div class="autocomplete-list" id="acList"></div>
       </div>
       <button id="predictBtn" class="btn-cta" onclick="predict()">
-        Get Started for Free
+        Predict
       </button>
     </div>
 
