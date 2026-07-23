@@ -579,69 +579,6 @@ body {
   margin-bottom: 60px;
 }
 
-/* ── Section 3: Scroll-Revealing Testimonial ─────────────────────────── */
-.testimonial-section {
-  min-height: 80vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 96px 32px;
-  max-width: 900px;
-  margin: 0 auto;
-}
-@media (min-width: 768px) {
-  .testimonial-section { padding: 120px 112px; }
-}
-
-.quote-mark {
-  width: 48px; height: 36px;
-  object-fit: contain;
-  margin-bottom: 32px;
-  opacity: 0.8;
-}
-
-.testimonial-text {
-  font-size: clamp(1.8rem, 3.5vw, 2.75rem);
-  font-weight: 500;
-  line-height: 1.25;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3em;
-  margin-bottom: 40px;
-}
-
-.word-span {
-  transition: opacity 0.25s ease, color 0.25s ease;
-  color: hsl(0 0% 35%);
-  opacity: 0.4;
-}
-.word-span.active {
-  color: hsl(0 0% 100%);
-  opacity: 1;
-}
-
-.author-row {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.author-avatar {
-  width: 56px; height: 56px;
-  border-radius: 50%;
-  border: 2px solid hsl(var(--foreground));
-  object-fit: cover;
-}
-.author-name {
-  font-size: 1rem;
-  font-weight: 600;
-  color: hsl(var(--foreground));
-}
-.author-role {
-  font-size: 0.875rem;
-  color: hsl(var(--muted-foreground));
-}
-
 /* Footer */
 footer {
   border-top: 1px solid hsl(var(--border));
@@ -809,27 +746,6 @@ footer {
 
   </section>
 </div>
-
-
-<!-- ── Section 3: Word-by-Word Scroll Reveal Testimonial ───────────────────── -->
-<section class="testimonial-section" id="testimonial">
-  <!-- Quote Mark Icon -->
-  <svg class="quote-mark" viewBox="0 0 24 24" fill="currentColor" style="color: hsl(var(--muted-foreground));">
-    <path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/>
-  </svg>
-
-  <div class="testimonial-text" id="quoteWords">
-    <!-- Words wrapped dynamically by JS for scroll highlight -->
-  </div>
-
-  <div class="author-row">
-    <img class="author-avatar" src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80" alt="Brooklyn Simmons" />
-    <div>
-      <div class="author-name">Brooklyn Simmons</div>
-      <div class="author-role">Product Manager, Corewave</div>
-    </div>
-  </div>
-</section>
 
 
 <footer>
@@ -1209,40 +1125,6 @@ function renderChart(labels, prices, isUp, support, resistance) {
     }
   });
 }
-
-// ── Word-by-Word Scroll Highlight Testimonial ──────────────────────────────
-const quoteText = "Neuralyn revolutionized how we handle financial insights using smart analytics. We are now driving better outcomes quicker than we ever imagined!";
-const wordsContainer = document.getElementById('quoteWords');
-const words = quoteText.split(" ");
-const wordSpans = [];
-
-words.forEach(w => {
-  const span = document.createElement('span');
-  span.className = 'word-span';
-  span.textContent = w;
-  wordsContainer.appendChild(span);
-  wordSpans.push(span);
-});
-
-window.addEventListener('scroll', () => {
-  const section = document.getElementById('testimonial');
-  if (!section) return;
-  const rect = section.getBoundingClientRect();
-  const winHeight = window.innerHeight;
-  
-  // Progress from 0 to 1 as section scrolls into view
-  const totalDist = winHeight * 0.8;
-  const currentProgress = Math.min(Math.max((winHeight - rect.top) / totalDist, 0), 1);
-
-  const activeCount = Math.floor(currentProgress * wordSpans.length);
-  wordSpans.forEach((span, idx) => {
-    if (idx <= activeCount) {
-      span.classList.add('active');
-    } else {
-      span.classList.remove('active');
-    }
-  });
-});
 
 // ── Loading Helpers ────────────────────────────────────────────────────────
 function showLoading(ticker) {
