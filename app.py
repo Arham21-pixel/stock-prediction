@@ -1,15 +1,15 @@
 """
-app.py  —  Indian Stock Prediction Web Platform (Enhanced & Calibrated v2)
-==========================================================================
+app.py  —  Indian Stock Prediction Web Platform (Enhanced & Robust v2)
+======================================================================
 Run:  python app.py
 Then open:  http://localhost:5000
 
-Features & Calibrations:
+Features & Safeguards:
+  • SimpleImputer + np.nan_to_num to prevent any NaN input errors in GradientBoosting
   • Prior-centered probability calibration (fixes "always UP" market bias)
   • 55+ engineered technical features + 5-model stacking ensemble
-  • Proper target alignment on full historical dataframe
-  • Fast vectorized indicators (<1s predictions)
-  • Dynamic UP / DOWN classification based on relative signal strength
+  • Vectorized indicator computation (<1s response time)
+  • Robust handling of stocks with limited history (<200 days) or missing data
 """
 
 import warnings, logging, json, traceback
@@ -30,6 +30,7 @@ _name_upper  = [(s["name"].upper(), s["symbol"], s["name"]) for s in ALL_STOCKS]
 _sym_upper   = [(s["symbol"].replace(".NS","").upper(), s["symbol"], s["name"]) for s in ALL_STOCKS]
 
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import SimpleImputer
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier, ExtraTreesClassifier
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import accuracy_score
@@ -164,7 +165,7 @@ def run_prediction(ticker: str) -> dict:
     raw = yf.download(ticker, start=start, auto_adjust=True, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
         raw.columns = raw.columns.get_level_values(0)
-    if raw.empty or len(raw) < 100:
+    if raw.empty or len(raw) < 60:
         raise ValueError(f"Not enough data for {ticker}. Make sure the ticker is correct (e.g. RELIANCE.NS).")
 
     df = raw[["Open", "High", "Low", "Close", "Volume"]].copy()
@@ -298,7 +299,7 @@ def run_prediction(ticker: str) -> dict:
     df["Month"]     = df.index.month
     df["Quarter"]   = df.index.quarter
 
-    # Compute target on full dataframe before split so yesterday is included in training
+    # Compute target on full dataframe before split
     df["Target"]    = (df["Close"].shift(-1) > df["Close"]).astype(int)
     df["LogReturn"] = np.log(df["Close"].shift(-1) / df["Close"])
 
@@ -327,27 +328,32 @@ def run_prediction(ticker: str) -> dict:
 
     df[FEAT] = df[FEAT].replace([np.inf, -np.inf], np.nan)
 
-    # Today is the last row (where Target is NaN because tomorrow has not happened)
     today_row = df.iloc[[-1]]
     X_today   = today_row[FEAT].values
 
-    # Train dataset consists of all completed days
-    train_df = df.iloc[:-1].dropna(subset=FEAT + ["Target", "LogReturn"]).copy()
+    train_df = df.iloc[:-1].dropna(subset=["Target", "LogReturn"]).copy()
 
-    if len(train_df) < 60:
+    if len(train_df) < 50:
         raise ValueError("Not enough historical data to train a model.")
 
     X_train  = train_df[FEAT].values
     y_train  = train_df["Target"].values
     y_ret    = train_df["LogReturn"].values
 
-    # Calculate historical prior UP rate for calibration
-    prior_up_rate = float(y_train.mean())  # e.g., 0.55
+    prior_up_rate = float(y_train.mean())
 
-    # 4. Scale
+    # 4. Impute missing NaNs & Scale
+    imputer  = SimpleImputer(strategy="median")
+    X_tr_imp = imputer.fit_transform(X_train)
+    X_td_imp = imputer.transform(X_today)
+
     scaler   = StandardScaler()
-    X_tr_sc  = scaler.fit_transform(X_train)
-    X_td_sc  = scaler.transform(X_today)
+    X_tr_sc  = scaler.fit_transform(X_tr_imp)
+    X_td_sc  = scaler.transform(X_td_imp)
+
+    # Ensure zero NaNs remain
+    X_tr_sc  = np.nan_to_num(X_tr_sc, nan=0.0)
+    X_td_sc  = np.nan_to_num(X_td_sc, nan=0.0)
 
     # 5. Feature Selection
     sel_rf = ExtraTreesClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=-1)
@@ -378,7 +384,6 @@ def run_prediction(ticker: str) -> dict:
 
     models = {"Random Forest": rf, "Gradient Boost": gb}
 
-    # Calculate pos_weight for XGBoost to balance classes
     pos_weight = (len(y_train) - sum(y_train)) / max(sum(y_train), 1)
 
     if HAS_XGB:
@@ -431,11 +436,9 @@ def run_prediction(ticker: str) -> dict:
     predicted_price_target = round(latest_close * (1 + predicted_return_pct / 100), 2)
 
     # ── Prior-Centered Probability Calibration ───────────────────────────────
-    # Subtract the market prior bias (e.g., if historical UP rate is 55%, 0.55 maps to 50% neutral)
     bias = prior_up_rate - 0.50
     calibrated_prob_up = float(np.clip(stack_prob_up - bias, 0.05, 0.95))
 
-    # Combine classification probability and regression return for final direction
     if calibrated_prob_up >= 0.50 and predicted_return_pct >= -0.15:
         direction = "UP"
         confidence = calibrated_prob_up * 100
@@ -698,7 +701,7 @@ def stocks():
 
 if __name__ == "__main__":
     print("\n" + "=" * 55)
-    print("  Indian Stock Prediction Platform (Calibrated v2)")
+    print("  Indian Stock Prediction Platform (Robust v2)")
     print("  Open your browser at:  http://localhost:5000")
     print("=" * 55 + "\n")
     app.run(debug=False, port=5000)
