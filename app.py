@@ -1,15 +1,15 @@
 """
-app.py  —  Indian Stock Prediction Web Platform (Enhanced & Speed-Optimized v2)
-==============================================================================
+app.py  —  Indian Stock Prediction Web Platform (Enhanced & Calibrated v2)
+==========================================================================
 Run:  python app.py
 Then open:  http://localhost:5000
 
-Optimizations:
-  • 100x faster Aroon indicator using numpy sliding window view
-  • Streamlined ensemble training (fast estimator counts + 2-pass validation fit)
-  • Reduced prediction latency from ~12s down to ~1s
-  • 55+ engineered features + 5 models (RF, GB, XGB, LGBM, LR)
-  • Stacking meta-learner + Ridge price magnitude regressor
+Features & Calibrations:
+  • Prior-centered probability calibration (fixes "always UP" market bias)
+  • 55+ engineered technical features + 5-model stacking ensemble
+  • Proper target alignment on full historical dataframe
+  • Fast vectorized indicators (<1s predictions)
+  • Dynamic UP / DOWN classification based on relative signal strength
 """
 
 import warnings, logging, json, traceback
@@ -117,7 +117,7 @@ def compute_adx(high, low, close, period=14):
 
 
 def compute_aroon(high, low, period=25):
-    """Vectorized Aroon Up/Down oscillator (100x faster than pd.rolling.apply)."""
+    """Vectorized Aroon Up/Down oscillator."""
     h_vals = high.values
     l_vals = low.values
     n = len(h_vals)
@@ -159,7 +159,7 @@ def run_prediction(ticker: str) -> dict:
     if cache_key in _model_cache:
         return _model_cache[cache_key]
 
-    # 1. Download 3 years of daily data (optimal speed & accuracy balance)
+    # 1. Download 3 years of daily data
     start = (date.today() - timedelta(days=3 * 365)).strftime("%Y-%m-%d")
     raw = yf.download(ticker, start=start, auto_adjust=True, progress=False)
     if isinstance(raw.columns, pd.MultiIndex):
@@ -201,7 +201,7 @@ def run_prediction(ticker: str) -> dict:
         df[f"EMA_{w}"]      = Close.ewm(span=w, adjust=False).mean()
         df[f"Pr_vs_SMA{w}"] = Close / df[f"SMA_{w}"] - 1
         df[f"Pr_vs_EMA{w}"] = Close / df[f"EMA_{w}"] - 1
-    # Long-term context
+
     df["SMA_200"]      = Close.rolling(200).mean()
     df["Pr_vs_SMA200"] = Close / df["SMA_200"] - 1
 
@@ -248,18 +248,16 @@ def run_prediction(ticker: str) -> dict:
     df["ADX"]      = adx
     df["Plus_DI"]  = plus_di
     df["Minus_DI"] = minus_di
-    df["DI_diff"]  = plus_di - minus_di   # positive = bullish, negative = bearish
+    df["DI_diff"]  = plus_di - minus_di
 
-    # Aroon (Fast Vectorized)
+    # Aroon
     aroon_up, aroon_down = compute_aroon(High, Low, 25)
     df["Aroon_Up"]   = aroon_up
     df["Aroon_Down"] = aroon_down
     df["Aroon_Osc"]  = aroon_up - aroon_down
 
-    # Chaikin Money Flow
+    # Money Flow
     df["CMF"] = compute_cmf(High, Low, Close, Volume, 20)
-
-    # Money Flow Index
     df["MFI"] = compute_mfi(High, Low, Close, Volume, 14)
 
     # Volume features
@@ -283,7 +281,7 @@ def run_prediction(ticker: str) -> dict:
     df["High_Low_pct"] = (High - Low) / Close
     df["Inside_day"]   = ((High < High.shift(1)) & (Low > Low.shift(1))).astype(int)
 
-    # Streak features — vectorized consecutive up/down days
+    # Streak features
     direction_sign = np.sign(df["Return_1d"].values)
     streak_arr = np.zeros(len(direction_sign), dtype=float)
     for i in range(1, len(direction_sign)):
@@ -300,7 +298,10 @@ def run_prediction(ticker: str) -> dict:
     df["Month"]     = df.index.month
     df["Quarter"]   = df.index.quarter
 
-    # ── Feature list ────────────────────────────────────────────────────────
+    # Compute target on full dataframe before split so yesterday is included in training
+    df["Target"]    = (df["Close"].shift(-1) > df["Close"]).astype(int)
+    df["LogReturn"] = np.log(df["Close"].shift(-1) / df["Close"])
+
     FEAT = [
         "Return_1d", "LogRet_1d",
         "Return_2d", "Return_3d", "Return_5d", "Return_10d", "Return_20d", "Gap",
@@ -325,14 +326,13 @@ def run_prediction(ticker: str) -> dict:
     ]
 
     df[FEAT] = df[FEAT].replace([np.inf, -np.inf], np.nan)
-    df.dropna(subset=FEAT, inplace=True)
 
-    # 4. Separate today from training
+    # Today is the last row (where Target is NaN because tomorrow has not happened)
     today_row = df.iloc[[-1]]
-    train_df  = df.iloc[:-1].copy()
-    train_df["Target"]    = (train_df["Close"].shift(-1) > train_df["Close"]).astype(int)
-    train_df["LogReturn"] = np.log(train_df["Close"].shift(-1) / train_df["Close"])
-    train_df.dropna(subset=["Target", "LogReturn"], inplace=True)
+    X_today   = today_row[FEAT].values
+
+    # Train dataset consists of all completed days
+    train_df = df.iloc[:-1].dropna(subset=FEAT + ["Target", "LogReturn"]).copy()
 
     if len(train_df) < 60:
         raise ValueError("Not enough historical data to train a model.")
@@ -340,14 +340,16 @@ def run_prediction(ticker: str) -> dict:
     X_train  = train_df[FEAT].values
     y_train  = train_df["Target"].values
     y_ret    = train_df["LogReturn"].values
-    X_today  = today_row[FEAT].values
 
-    # 5. Scale
+    # Calculate historical prior UP rate for calibration
+    prior_up_rate = float(y_train.mean())  # e.g., 0.55
+
+    # 4. Scale
     scaler   = StandardScaler()
     X_tr_sc  = scaler.fit_transform(X_train)
     X_td_sc  = scaler.transform(X_today)
 
-    # 6. Ultra-Fast Feature Selection (ExtraTrees with 50 trees)
+    # 5. Feature Selection
     sel_rf = ExtraTreesClassifier(n_estimators=50, max_depth=5, random_state=42, n_jobs=-1)
     sel_rf.fit(X_tr_sc, y_train)
     imp       = pd.Series(sel_rf.feature_importances_, index=FEAT)
@@ -359,7 +361,7 @@ def run_prediction(ticker: str) -> dict:
     X_tr_sel = X_tr_sc[:, feat_idx]
     X_td_sel = X_td_sc[:, feat_idx]
 
-    # 7. Optimized 5-Model Ensemble Training (2-Pass Validation Split for Speed)
+    # 6. Ensemble Training (Balanced Class Weights)
     val_split = int(len(X_tr_sel) * 0.8)
     X_tr_sub, X_val_sub = X_tr_sel[:val_split], X_tr_sel[val_split:]
     y_tr_sub, y_val_sub = y_train[:val_split], y_train[val_split:]
@@ -376,10 +378,14 @@ def run_prediction(ticker: str) -> dict:
 
     models = {"Random Forest": rf, "Gradient Boost": gb}
 
+    # Calculate pos_weight for XGBoost to balance classes
+    pos_weight = (len(y_train) - sum(y_train)) / max(sum(y_train), 1)
+
     if HAS_XGB:
         models["XGBoost"] = XGBClassifier(
             n_estimators=80, max_depth=3, learning_rate=0.05,
             subsample=0.85, colsample_bytree=0.8,
+            scale_pos_weight=pos_weight,
             reg_alpha=0.3, reg_lambda=1.0,
             use_label_encoder=False, eval_metric="logloss",
             random_state=42, n_jobs=-1, verbosity=0
@@ -402,15 +408,13 @@ def run_prediction(ticker: str) -> dict:
     today_base = {}
 
     for name, model in models.items():
-        # Pass 1: train on sub-train to get validation predictions for meta-learner
         model.fit(X_tr_sub, y_tr_sub)
         val_probs.append(model.predict_proba(X_val_sub)[:, 1])
 
-        # Pass 2: train on full data to predict today
         model.fit(X_tr_sel, y_train)
         today_base[name] = float(model.predict_proba(X_td_sel)[0, 1])
 
-    # Stacking Meta-Learner (LogisticRegression)
+    # Stacking Meta-Learner
     val_matrix   = np.column_stack(val_probs)
     today_vector = np.array(list(today_base.values())).reshape(1, -1)
 
@@ -418,33 +422,46 @@ def run_prediction(ticker: str) -> dict:
     meta_lr.fit(val_matrix, y_val_sub)
     stack_prob_up = float(meta_lr.predict_proba(today_vector)[0, 1])
 
-    probs_up   = today_base
-    direction  = "UP" if stack_prob_up >= 0.5 else "DOWN"
-    confidence = stack_prob_up * 100 if direction == "UP" else (1 - stack_prob_up) * 100
+    # 7. Ridge regression for price magnitude estimation
+    ridge = Ridge(alpha=1.0)
+    ridge.fit(X_tr_sel, y_ret)
+    predicted_log_return = float(ridge.predict(X_td_sel)[0])
+    predicted_return_pct = (np.exp(predicted_log_return) - 1) * 100
+    predicted_return_pct = float(np.clip(predicted_return_pct, -8.0, 8.0))
+    predicted_price_target = round(latest_close * (1 + predicted_return_pct / 100), 2)
+
+    # ── Prior-Centered Probability Calibration ───────────────────────────────
+    # Subtract the market prior bias (e.g., if historical UP rate is 55%, 0.55 maps to 50% neutral)
+    bias = prior_up_rate - 0.50
+    calibrated_prob_up = float(np.clip(stack_prob_up - bias, 0.05, 0.95))
+
+    # Combine classification probability and regression return for final direction
+    if calibrated_prob_up >= 0.50 and predicted_return_pct >= -0.15:
+        direction = "UP"
+        confidence = calibrated_prob_up * 100
+    elif calibrated_prob_up < 0.50 or predicted_return_pct < -0.15:
+        direction = "DOWN"
+        confidence = (1 - calibrated_prob_up) * 100
+    else:
+        direction = "UP" if calibrated_prob_up >= 0.50 else "DOWN"
+        confidence = calibrated_prob_up * 100 if direction == "UP" else (1 - calibrated_prob_up) * 100
+
+    probs_up = {k: round(v * 100, 1) for k, v in today_base.items()}
 
     # Validation accuracies
     val_acc_cv   = float(accuracy_score(y_val_sub, (val_matrix.mean(axis=1) >= 0.5).astype(int)) * 100)
     val_acc_last = val_acc_cv
 
-    # 8. Ridge regression for price magnitude estimation
-    ridge = Ridge(alpha=1.0)
-    ridge.fit(X_tr_sel, y_ret)
-    predicted_log_return = float(ridge.predict(X_td_sel)[0])
-    predicted_return_pct = (np.exp(predicted_log_return) - 1) * 100
-
-    predicted_return_pct = float(np.clip(predicted_return_pct, -8.0, 8.0))
-    predicted_price_target = round(latest_close * (1 + predicted_return_pct / 100), 2)
-
-    # 9. ATR-based price bands
+    # 8. ATR-based price bands
     atr_value   = float(atr_abs.iloc[-1])
     atr_upper   = round(latest_close + atr_value, 2)
     atr_lower   = round(latest_close - atr_value, 2)
 
-    # 10. Support & Resistance (rolling 20-day high/low)
+    # 9. Support & Resistance
     support_level    = round(float(Low.tail(20).min()), 2)
     resistance_level = round(float(High.tail(20).max()), 2)
 
-    # 11. Trend strength label
+    # 10. Trend strength label
     adx_val = float(adx.iloc[-1]) if not np.isnan(adx.iloc[-1]) else 0.0
     if adx_val >= 35:
         trend_label = "Very Strong"
@@ -455,7 +472,7 @@ def run_prediction(ticker: str) -> dict:
     else:
         trend_label = "Weak"
 
-    # 12. Generate plain-English signals
+    # 11. Generate signals
     feat_vals = dict(zip(FEAT, X_today[0]))
 
     def signal_card(icon, title, detail, sentiment):
@@ -564,13 +581,13 @@ def run_prediction(ticker: str) -> dict:
         signals.append(signal_card("🌙", "Opening Gap",
             f"Stock opened {abs(gap)*100:.2f}% lower than yesterday — negative overnight sentiment.", "negative"))
 
-    # 13. 30-day price history for chart
+    # 12. 30-day price history for chart
     last30       = df["Close"].tail(30)
     chart_labels = [str(d.date()) for d in last30.index]
     chart_prices = [round(float(v), 2) for v in last30.values]
 
-    # 14. Model agreement count
-    n_up   = sum(1 for p in probs_up.values() if p >= 0.5)
+    # 13. Model agreement count
+    n_up   = sum(1 for p in probs_up.values() if p >= 50)
     n_down = len(probs_up) - n_up
     agreement = (f"{n_up}/{len(probs_up)} models predict UP"
                  if direction == "UP"
@@ -584,9 +601,9 @@ def run_prediction(ticker: str) -> dict:
         "price_change_pct":    round(price_change_p, 2),
         "direction":           direction,
         "confidence":          round(confidence, 1),
-        "stack_prob_up":       round(stack_prob_up * 100, 1),
+        "stack_prob_up":       round(calibrated_prob_up * 100, 1),
         "agreement":           agreement,
-        "model_probs":         {k: round(v * 100, 1) for k, v in probs_up.items()},
+        "model_probs":         probs_up,
         "val_accuracy":        round(val_acc_last, 1),
         "val_accuracy_cv":     round(val_acc_cv, 1),
         "signals":             signals,
@@ -681,7 +698,7 @@ def stocks():
 
 if __name__ == "__main__":
     print("\n" + "=" * 55)
-    print("  Indian Stock Prediction Platform (Speed-Optimized v2)")
+    print("  Indian Stock Prediction Platform (Calibrated v2)")
     print("  Open your browser at:  http://localhost:5000")
     print("=" * 55 + "\n")
     app.run(debug=False, port=5000)
